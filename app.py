@@ -12,7 +12,7 @@ import streamlit as st
 
 
 st.set_page_config(
-    page_title="KBO 감독 시즌 시뮬레이터 v6",
+    page_title="KBO 감독 시즌 시뮬레이터 v7",
     page_icon="⚾",
     layout="wide",
 )
@@ -261,6 +261,7 @@ def make_fallback_player_database() -> pd.DataFrame:
 
 def load_player_database() -> pd.DataFrame:
     preferred_files = [
+        "players_2026_raw_current_positions.csv",
         "players_actual_no_regression_positions.csv",
         "players_2026_2025_weighted_ratings.csv",
         "players_2026_ratings.csv",
@@ -276,7 +277,7 @@ def load_player_database() -> pd.DataFrame:
     if chosen_path is None:
         st.warning(
             "선수 CSV 파일을 찾지 못해서 임시 로스터로 실행합니다. "
-            "GitHub 저장소에 players_2026_2025_weighted_ratings.csv를 함께 올리세요."
+            "GitHub 저장소에 players_2026_raw_current_positions.csv를 함께 올리세요."
         )
         df = make_fallback_player_database()
     else:
@@ -379,7 +380,7 @@ def build_position_balanced_lineup(hitters: pd.DataFrame) -> Tuple[List[Player],
         if row is None:
             raise ValueError(
                 f"{slot} 수비위치에 들어갈 실제 포지션 선수가 부족합니다. "
-                "players_actual_no_regression_positions.csv의 eligible_positions를 확인하세요."
+                "players_2026_raw_current_positions.csv의 eligible_positions를 확인하세요."
             )
         chosen_indices.add(row.name)
         lineup_rows.append((slot, row))
@@ -1342,7 +1343,7 @@ if "season" not in st.session_state:
     st.session_state.season = None
 
 
-st.title("⚾ KBO 감독 시즌 시뮬레이터 v6")
+st.title("⚾ KBO 감독 시즌 시뮬레이터 v7")
 st.caption(
     "사용자 팀 경기는 포지션별 선발 라인업으로 직접 진행하고 선수 교체를 지시합니다. "
     "같은 날짜의 다른 경기들은 다음 경기로 넘어갈 때 계산됩니다."

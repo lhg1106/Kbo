@@ -1,48 +1,64 @@
-# KBO 감독 시즌 시뮬레이터 v6
+# KBO 시즌 시뮬레이터 v7 — 현재 시즌 원자료 우선 버전
 
-수정 내용:
+## 핵심 변경
 
-- 루 상황을 그래픽 다이아몬드로 표시
-- 라인업 자동 선발을 `C, 1B, 2B, SS, 3B, LF, CF, RF, DH` 슬롯 기준으로 변경
-- `내야수/외야수` 대분류 대신 `eligible_positions` 열의 실제 수비 위치를 사용
-- 평균회귀로 만든 능력치를 실제 기록처럼 취급하지 않도록 `rating_is_actual` 열 추가
-- 선수 CSV가 없어도 앱이 터지지 않도록 fallback 유지
+이 버전의 능력치 계산은 규정타석/규정이닝을 기준으로 선수 데이터를 버리지 않습니다.
 
-## 핵심 파일
+1. 2026 기록이 있으면 1타석, 1경기, 1/3이닝이라도 2026 스탯 그대로 능력치 식에 넣습니다.
+2. 2026 기록이 아예 없을 때만 2025 기록을 사용합니다.
+3. 평균회귀, 표본 보정, 규정타석/규정이닝 컷을 적용하지 않습니다.
+4. 실제 기록 행이 없으면 `rating_is_actual=False`로 표시하고 `missing_raw_current_stats_report.csv`에 따로 저장합니다.
+
+## 주요 파일
 
 - `app.py`: Streamlit 앱
-- `schedule_2026_fixed.csv`: 고정 일정
-- `players_actual_no_regression_positions.csv`: 현재 앱이 우선 읽는 선수 파일
-- `missing_actual_stats_report.csv`: 2026/2025 실제 세부 기록이 아직 없는 선수 목록
-- `build_player_ratings_no_regression.py`: 평균회귀 없이 실제 기록 CSV로 능력치 재계산
+- `players_2026_raw_current_positions.csv`: 앱이 가장 먼저 읽는 선수 능력치 파일
+- `build_player_ratings_raw_current.py`: 원자료 기반 능력치 재계산 스크립트
+- `hitter_stats_template.csv`: 타자 기록 CSV 형식
+- `pitcher_stats_template.csv`: 투수 기록 CSV 형식
+- `schedule_2026_fixed.csv`: 시즌 시작 당시 고정 일정
 
-## 실제 수비 위치
+## 실제 전체 스탯을 반영하는 방법
 
-앱은 다음 열을 사용합니다.
+Yagoonara 또는 KBO에서 2026/2025 타자·투수 전체 선수 CSV를 내려받아 아래 이름으로 저장합니다.
 
-```csv
-primary_position,secondary_positions,eligible_positions
-SS,2B;3B,SS;2B;3B;DH
+```text
+hitter_stats_2026.csv
+pitcher_stats_2026.csv
+hitter_stats_2025.csv
+pitcher_stats_2025.csv
 ```
 
-포지션 코드는 `P, C, 1B, 2B, SS, 3B, LF, CF, RF, DH`만 사용합니다.
-
-## 평균회귀 없음 원칙
-
-이 버전은 실제 기록이 없는데 평균 능력치인 것처럼 숨기지 않습니다.
-
-- `rating_is_actual=True`: 2026 또는 2025 실제 기록 기반
-- `rating_is_actual=False`: 실제 세부 기록이 없어서 확인 필요
-
-전체 300명을 전부 실제 수치로 채우려면 `hitter_stats_2026.csv`, `hitter_stats_2025.csv`, `pitcher_stats_2026.csv`, `pitcher_stats_2025.csv`를 넣고 아래를 실행하세요.
+그 다음 실행합니다.
 
 ```bash
-python build_player_ratings_no_regression.py
+python build_player_ratings_raw_current.py
 ```
 
-## 실행
+그러면 `players_2026_raw_current_positions.csv`가 다시 생성되고, 앱은 이 파일을 자동으로 먼저 읽습니다.
 
-```bash
-pip install -r requirements.txt
-streamlit run app.py
+## 능력치 식
+
+### 타자
+
+- contact = 타율 백분위 70% + 삼진율 역백분위 30%
+- power = 장타율 백분위 55% + ISO 백분위 30% + HR/PA 백분위 15%
+- discipline = 출루율 백분위 70% + 볼넷률 백분위 30%
+- speed = 도루 수 백분위 65% + 도루 성공률 백분위 35%
+
+### 투수
+
+- stuff = K/9 백분위 55% + 피안타율 역백분위 25% + ERA 역백분위 20%
+- control = BB/9 역백분위 55% + WHIP 역백분위 45%
+- stamina = 이닝 백분위 70% + 경기당 이닝 백분위 30%
+
+## 배포 주의
+
+GitHub 저장소 최상단에 최소한 아래 파일이 있어야 합니다.
+
+```text
+app.py
+requirements.txt
+schedule_2026_fixed.csv
+players_2026_raw_current_positions.csv
 ```
