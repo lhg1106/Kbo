@@ -1,64 +1,68 @@
-# KBO 시즌 시뮬레이터 v7 — 현재 시즌 원자료 우선 버전
+# KBO 시즌 시뮬레이터 v8 — 직접 스탯 산출판
 
-## 핵심 변경
+## 이번 수정의 핵심
 
-이 버전의 능력치 계산은 규정타석/규정이닝을 기준으로 선수 데이터를 버리지 않습니다.
+- 규정타석/규정이닝 조건을 사용하지 않습니다.
+- 2026년에 1타석 또는 1/3이닝이라도 기록이 있으면 2026 기록을 그대로 사용합니다.
+- 2025 기록은 2026 기록이 아예 없는 선수에게만 사용합니다.
+- 표본 수에 따른 평균회귀, 출전량 가중치, 임의 50점 보정을 하지 않습니다.
+- 실제 기록이 없는 선수는 결측으로 남기고 매칭 리포트에 표시합니다.
+- 실제 수비 위치 정보는 `roster_positions_2026.csv`에서 유지합니다.
+- 완성 파일 이름은 `players_2026_direct_stats_positions.csv`입니다.
 
-1. 2026 기록이 있으면 1타석, 1경기, 1/3이닝이라도 2026 스탯 그대로 능력치 식에 넣습니다.
-2. 2026 기록이 아예 없을 때만 2025 기록을 사용합니다.
-3. 평균회귀, 표본 보정, 규정타석/규정이닝 컷을 적용하지 않습니다.
-4. 실제 기록 행이 없으면 `rating_is_actual=False`로 표시하고 `missing_raw_current_stats_report.csv`에 따로 저장합니다.
+## 필요한 전체 기록 CSV
 
-## 주요 파일
+다음 4개 파일을 같은 폴더에 넣습니다.
 
-- `app.py`: Streamlit 앱
-- `players_2026_raw_current_positions.csv`: 앱이 가장 먼저 읽는 선수 능력치 파일
-- `build_player_ratings_raw_current.py`: 원자료 기반 능력치 재계산 스크립트
-- `hitter_stats_template.csv`: 타자 기록 CSV 형식
-- `pitcher_stats_template.csv`: 투수 기록 CSV 형식
-- `schedule_2026_fixed.csv`: 시즌 시작 당시 고정 일정
+- `hitter_stats_2026.csv`
+- `pitcher_stats_2026.csv`
+- `hitter_stats_2025.csv`
+- `pitcher_stats_2025.csv`
 
-## 실제 전체 스탯을 반영하는 방법
+2026 파일은 필수이고, 2025 파일은 2026 미출전 선수 보충용입니다.
 
-Yagoonara 또는 KBO에서 2026/2025 타자·투수 전체 선수 CSV를 내려받아 아래 이름으로 저장합니다.
-
-```text
-hitter_stats_2026.csv
-pitcher_stats_2026.csv
-hitter_stats_2025.csv
-pitcher_stats_2025.csv
-```
-
-그 다음 실행합니다.
+## 터미널에서 생성
 
 ```bash
-python build_player_ratings_raw_current.py
+pip install -r requirements.txt
+python build_player_ratings_direct.py
 ```
 
-그러면 `players_2026_raw_current_positions.csv`가 다시 생성되고, 앱은 이 파일을 자동으로 먼저 읽습니다.
+## 브라우저에서 생성
 
-## 능력치 식
+```bash
+streamlit run stats_builder_app.py
+```
+
+화면에서 전체 기록 CSV를 업로드하면 완성 선수 파일과 매칭 리포트를 받을 수 있습니다.
+
+## 능력치 계산
 
 ### 타자
 
-- contact = 타율 백분위 70% + 삼진율 역백분위 30%
-- power = 장타율 백분위 55% + ISO 백분위 30% + HR/PA 백분위 15%
-- discipline = 출루율 백분위 70% + 볼넷률 백분위 30%
-- speed = 도루 수 백분위 65% + 도루 성공률 백분위 35%
+- 콘택트: 타율 70% + 삼진율 억제 30%
+- 파워: 장타율 45% + ISO 35% + 홈런/타석 20%
+- 선구안: 출루율 65% + 볼넷률 35%
+- 주력: 도루 수 65% + 도루 성공률 35%
 
 ### 투수
 
-- stuff = K/9 백분위 55% + 피안타율 역백분위 25% + ERA 역백분위 20%
-- control = BB/9 역백분위 55% + WHIP 역백분위 45%
-- stamina = 이닝 백분위 70% + 경기당 이닝 백분위 30%
+- 구위: K/9 42% + H/9 억제 25% + ERA 억제 20% + HR/9 억제 13%
+- 제구: BB/9 억제 58% + WHIP 억제 42%
+- 체력: 경기당 이닝 70% + 총이닝 30%
 
-## 배포 주의
+각 항목은 실제 2026 기록의 리그 내 백분위를 20~80 점수로 변환합니다.
+규정타석·규정이닝이나 표본 크기는 점수 계산에 사용하지 않습니다.
 
-GitHub 저장소 최상단에 최소한 아래 파일이 있어야 합니다.
+## Streamlit 게임 실행
 
-```text
-app.py
-requirements.txt
-schedule_2026_fixed.csv
-players_2026_raw_current_positions.csv
+완성된 `players_2026_direct_stats_positions.csv`를 GitHub 최상단에 올린 뒤:
+
+```bash
+streamlit run app.py
 ```
+
+## 주의
+
+이 패키지는 실제값을 임의로 만들어 넣지 않습니다. 입력한 전체 기록 CSV에서 선수 이름이
+매칭되지 않으면 그 선수는 `direct_stats_build_report.csv`에 누락으로 표시됩니다.

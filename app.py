@@ -12,7 +12,7 @@ import streamlit as st
 
 
 st.set_page_config(
-    page_title="KBO 감독 시즌 시뮬레이터 v7",
+    page_title="KBO 감독 시즌 시뮬레이터 v5",
     page_icon="⚾",
     layout="wide",
 )
@@ -81,10 +81,6 @@ class Player:
     role: str
     position: str = ""
     lineup_slot: str = ""
-    primary_position: str = ""
-    secondary_positions: str = ""
-    eligible_positions: str = ""
-    rating_is_actual: bool = True
     contact: int = 50
     power: int = 50
     discipline: int = 50
@@ -200,19 +196,16 @@ class SeasonState:
 
 LINEUP_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"]
 SLOT_POSITION_RULES = {
-    "C": ["C"],
-    "1B": ["1B"],
-    "2B": ["2B"],
-    "SS": ["SS"],
-    "3B": ["3B"],
-    "LF": ["LF"],
-    "CF": ["CF"],
-    "RF": ["RF"],
-    "DH": ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"],
+    "C": ["포수"],
+    "1B": ["내야수"],
+    "2B": ["내야수"],
+    "SS": ["내야수"],
+    "3B": ["내야수"],
+    "LF": ["외야수"],
+    "CF": ["외야수"],
+    "RF": ["외야수"],
+    "DH": ["포수", "내야수", "외야수"],
 }
-
-def eligible_set(value: str) -> set:
-    return {x.strip() for x in str(value).replace(",", ";").split(";") if x.strip()}
 
 
 def make_fallback_player_database() -> pd.DataFrame:
@@ -261,8 +254,7 @@ def make_fallback_player_database() -> pd.DataFrame:
 
 def load_player_database() -> pd.DataFrame:
     preferred_files = [
-        "players_2026_raw_current_positions.csv",
-        "players_actual_no_regression_positions.csv",
+        "players_2026_direct_stats_positions.csv",
         "players_2026_2025_weighted_ratings.csv",
         "players_2026_ratings.csv",
         "players_2026_07_23.csv",
@@ -277,7 +269,7 @@ def load_player_database() -> pd.DataFrame:
     if chosen_path is None:
         st.warning(
             "선수 CSV 파일을 찾지 못해서 임시 로스터로 실행합니다. "
-            "GitHub 저장소에 players_2026_raw_current_positions.csv를 함께 올리세요."
+            "GitHub 저장소에 players_2026_direct_stats_positions.csv를 함께 올리세요."
         )
         df = make_fallback_player_database()
     else:
@@ -293,22 +285,6 @@ def load_player_database() -> pd.DataFrame:
         df["position"] = ""
     if "role" not in df.columns:
         df["role"] = "batter"
-    if "primary_position" not in df.columns:
-        df["primary_position"] = df["position"].map({"투수":"P", "포수":"C", "내야수":"IF", "외야수":"OF"}).fillna(df["position"])
-    if "eligible_positions" not in df.columns:
-        def default_eligible(row):
-            pos = str(row.get("primary_position", ""))
-            if pos == "P": return "P"
-            if pos == "C": return "C;DH"
-            if pos == "IF": return "1B;2B;SS;3B;DH"
-            if pos == "OF": return "LF;CF;RF;DH"
-            return pos or "DH"
-        df["eligible_positions"] = df.apply(default_eligible, axis=1)
-    if "secondary_positions" not in df.columns:
-        df["secondary_positions"] = ""
-    if "rating_is_actual" not in df.columns:
-        source = df.get("rating_source", pd.Series([""] * len(df))).astype(str).str.lower()
-        df["rating_is_actual"] = ~source.str.contains("league_average|fallback|missing|generated", regex=True)
 
     return df
 
@@ -323,10 +299,6 @@ def row_to_player(row: pd.Series, lineup_slot: str = "") -> Player:
         role=str(row["role"]),
         position=str(row.get("position", "")),
         lineup_slot=lineup_slot,
-        primary_position=str(row.get("primary_position", row.get("position", ""))),
-        secondary_positions=str(row.get("secondary_positions", "")),
-        eligible_positions=str(row.get("eligible_positions", row.get("primary_position", row.get("position", "")))),
-        rating_is_actual=bool(row.get("rating_is_actual", True)),
         contact=int(row["contact"]),
         power=int(row["power"]),
         discipline=int(row["discipline"]),
@@ -351,20 +323,13 @@ def pick_best_by_position(
     chosen_indices: set,
     positions: List[str],
 ) -> Optional[pd.Series]:
-    required = set(positions)
-    pool = hitters[~hitters.index.isin(chosen_indices)].copy()
-    pool = pool[pool["eligible_positions"].apply(lambda value: bool(eligible_set(value) & required))]
+    pool = hitters[
+        (~hitters.index.isin(chosen_indices))
+        & (hitters["position"].isin(positions))
+    ].copy()
     if pool.empty:
         return None
-
-    # 평균회귀 데이터보다 실제 2026/2025 기록 기반 선수 우선.
-    if "rating_is_actual" in pool.columns:
-        pool = pool.sort_values(
-            ["rating_is_actual", "overall", "contact", "power"],
-            ascending=[False, False, False, False],
-        )
-    else:
-        pool = pool.sort_values(["overall", "contact", "power"], ascending=False)
+    pool = pool.sort_values(["overall", "contact", "power"], ascending=False)
     return pool.iloc[0]
 
 
@@ -377,11 +342,15 @@ def build_position_balanced_lineup(hitters: pd.DataFrame) -> Tuple[List[Player],
     for slot in LINEUP_SLOTS:
         allowed_positions = SLOT_POSITION_RULES[slot]
         row = pick_best_by_position(hitters, chosen_indices, allowed_positions)
-        if row is None:
-            raise ValueError(
-                f"{slot} 수비위치에 들어갈 실제 포지션 선수가 부족합니다. "
-                "players_2026_raw_current_positions.csv의 eligible_positions를 확인하세요."
+        if row is None and slot != "DH":
+            # 특정 포지션 선수가 부족한 경우에만 예외적으로 남은 타자 중 최고 선수를 넣습니다.
+            row = pick_best_by_position(
+                hitters,
+                chosen_indices,
+                ["포수", "내야수", "외야수"],
             )
+        if row is None:
+            raise ValueError("선발 라인업을 구성할 타자 데이터가 부족합니다.")
         chosen_indices.add(row.name)
         lineup_rows.append((slot, row))
 
@@ -1186,9 +1155,7 @@ def lineup_dataframe(team: TeamGameState) -> pd.DataFrame:
         {
             "타순": index + 1,
             "수비": player.lineup_slot,
-            "실제포지션": player.primary_position,
-            "가능수비": player.eligible_positions,
-            "실제기록": "Y" if player.rating_is_actual else "확인필요",
+            "등록포지션": player.position,
             "선수": player.name,
             "컨택": player.contact,
             "파워": player.power,
@@ -1217,40 +1184,6 @@ def bases_text(bases: List[Optional[Player]]) -> str:
         occupied.append("3루")
 
     return " · ".join(occupied) if occupied else "주자 없음"
-
-
-def render_base_diamond(bases: List[Optional[Player]]) -> None:
-    def cls(index: int) -> str:
-        return "base occupied" if bases[index] is not None else "base empty"
-
-    def label(index: int, text: str) -> str:
-        runner = bases[index].name if bases[index] is not None else text
-        return runner
-
-    html = f"""
-    <style>
-    .field-wrap {{ width: 230px; height: 170px; position: relative; margin: 4px 0 16px 0; }}
-    .base {{ position:absolute; width:54px; height:54px; transform:rotate(45deg);
-             border:2px solid #ddd; border-radius:6px; display:flex; align-items:center; justify-content:center;
-             font-weight:700; background:#272b30; }}
-    .base span {{ transform:rotate(-45deg); font-size:11px; text-align:center; line-height:1.05; max-width:72px; }}
-    .occupied {{ background:#ff4b4b; color:white; border-color:#ffb3b3; }}
-    .empty {{ color:#d7d7d7; }}
-    .b1 {{ left:145px; top:75px; }}
-    .b2 {{ left:88px; top:18px; }}
-    .b3 {{ left:31px; top:75px; }}
-    .home {{ position:absolute; left:88px; top:132px; width:54px; height:20px; text-align:center; color:#aaa; font-size:12px; }}
-    .line {{ position:absolute; left:54px; top:52px; width:122px; height:122px; border:1px dashed #555; transform:rotate(45deg); }}
-    </style>
-    <div class="field-wrap">
-      <div class="line"></div>
-      <div class="base b2 {cls(1)}"><span>{label(1, '2루')}</span></div>
-      <div class="base b1 {cls(0)}"><span>{label(0, '1루')}</span></div>
-      <div class="base b3 {cls(2)}"><span>{label(2, '3루')}</span></div>
-      <div class="home">HOME</div>
-    </div>
-    """
-    st.markdown(html, unsafe_allow_html=True)
 
 
 def season_to_json(season: SeasonState) -> str:
@@ -1343,7 +1276,7 @@ if "season" not in st.session_state:
     st.session_state.season = None
 
 
-st.title("⚾ KBO 감독 시즌 시뮬레이터 v7")
+st.title("⚾ KBO 감독 시즌 시뮬레이터 v5")
 st.caption(
     "사용자 팀 경기는 포지션별 선발 라인업으로 직접 진행하고 선수 교체를 지시합니다. "
     "같은 날짜의 다른 경기들은 다음 경기로 넘어갈 때 계산됩니다."
@@ -1458,8 +1391,6 @@ with game_tab:
             f"{game.away.score}:{game.home.score}",
         )
 
-        render_base_diamond(game.bases)
-
         batting_team, fielding_team = current_teams(game)
         current_batter = batting_team.lineup[
             batting_team.batting_index
@@ -1522,16 +1453,18 @@ with game_tab:
                     )
                     target_index = lineup_options[selected_lineup]
                     target_slot = user_team.lineup[target_index].lineup_slot
-                    allowed = set(SLOT_POSITION_RULES.get(target_slot, LINEUP_SLOTS))
+                    allowed = SLOT_POSITION_RULES.get(
+                        target_slot, ["포수", "내야수", "외야수"]
+                    )
                     filtered_bench = {
-                        f"{player.name} ({player.primary_position}/{player.eligible_positions})": i
+                        f"{player.name} ({player.position})": i
                         for i, player in enumerate(user_team.bench)
-                        if eligible_set(player.eligible_positions) & allowed
+                        if player.position in allowed
                     }
                     if not filtered_bench:
                         st.warning(
                             f"{target_slot} 자리에 들어갈 수 있는 벤치 선수가 없습니다. "
-                            "eligible_positions 열에 해당 수비위치가 있는 선수만 투입됩니다."
+                            "DH는 모든 야수, 포수/내야/외야 슬롯은 같은 등록 포지션만 허용합니다."
                         )
                     else:
                         selected_bench = st.selectbox(
